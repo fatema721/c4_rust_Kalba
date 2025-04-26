@@ -738,3 +738,4 @@ impl Compiler {
         // exit the program with the exit code to signal success or failure
         std::process::exit(exit_code);
     }
+}
