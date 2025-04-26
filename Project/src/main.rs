@@ -9,7 +9,8 @@ type Int = i64;
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[allow(dead_code)]
 enum Token {
-    Num = 128, Fun, Sys, Glo, Loc, Id,
+    Num = 128, Float, // ADDED FOR FLOAT, Float token for floating point literals
+    Fun, Sys, Glo, Loc, Id,
     Char, Else, Enum, If, Int, Return, Sizeof, While,
     Assign, Cond, Lor, Lan, Or, Xor, And, Eq, Ne, Lt, Gt, Le, Ge, Shl, Shr, Add, Sub, Mul, Div, Mod, Inc, Dec,
     OPEN, READ, CLOS, PRTF, MALC, FREE, MSET, MCMP, EXIT,
@@ -23,12 +24,13 @@ enum Opcode {
     LEA, IMM, JMP, JSR, BZ, BNZ, ENT, ADJ, LEV, LI, LC, SI, SC, PSH,
     OR, XOR, AND, EQ, NE, LT, GT, LE, GE, SHL, SHR, ADD, SUB, MUL, DIV, MOD,
     OPEN, READ, CLOS, PRTF, MALC, FREE, MSET, MCMP, EXIT,
+    FADD, FSUB, FMUL, FDIV, // ADDED FOR FLOAT, Opcodes for floating point operations
 }
 
 // Types
 #[derive(Debug, PartialEq, Clone, Copy)]
 enum Type {
-    CHAR = 0, INT, PTR,
+    CHAR = 0, INT, PTR, FLOAT, // ADDED FOR FLOAT, Float type
 }
 
 // Identifier struct for symbol table
@@ -56,6 +58,8 @@ struct Compiler {
     sym: Vec<Ident>,
     tk: Option<Token>,
     ival: Int,
+    fval: f64, // ADDED FOR FLOAT, Store floating-point literal value
+    col: Int, // ADDED FOR ERROR REPORTING, Track column number
     ty: Type,
     loc: Int,
     line: Int,
@@ -75,6 +79,8 @@ impl Compiler {
             sym: Vec::new(),
             tk: None,
             ival: 0,
+            fval: 0.0, // ADDED FOR FLOAT, Initialize fval
+            col: 1, // ADDED FOR ERROR REPORTING, Initialize column
             ty: Type::INT,
             loc: 0,
             line: 1,
@@ -83,7 +89,6 @@ impl Compiler {
         }
     }
 
-// PUT YOUR CODE HERE
     /// Advances the compiler to the next token in the source code, performing lexical analysis.
     /// Updates the current token (`self.tk`), position (`self.p`), and related state.
     fn next(&mut self) {
