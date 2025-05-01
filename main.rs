@@ -974,3 +974,589 @@ pub unsafe extern "C" fn expr(mut lev: libc::c_longlong) {
         }
     }
 }
+// Defines a function to parse and generate code for statements, accessible from C code
+#[no_mangle]
+pub unsafe extern "C" fn stmt() {
+    // Pointers for tracking jump addresses in control flow
+    let mut a: *mut libc::c_longlong = 0 as *mut libc::c_longlong; // Start of loop
+    let mut b: *mut libc::c_longlong = 0 as *mut libc::c_longlong; // Jump target
+
+    // Handle 'if' statement
+    if tk == If as libc::c_int as libc::c_longlong {
+        next(); // Consume 'if'
+        // Expect opening parenthesis
+        if tk == '(' as i32 as libc::c_longlong {
+            next();
+        } else {
+            printf(b"%d: open paren expected\n\0" as *const u8 as *const libc::c_char, line);
+            exit(-(1 as libc::c_int));
+        }
+        // Parse condition expression
+        expr(Assign as libc::c_int as libc::c_longlong);
+        // Expect closing parenthesis
+        if tk == ')' as i32 as libc::c_longlong {
+            next();
+        } else {
+            printf(b"%d: close paren expected\n\0" as *const u8 as *const libc::c_char, line);
+            exit(-(1 as libc::c_int));
+        }
+        // Emit branch-if-zero for false condition
+        e = e.offset(1); *e = BZ as libc::c_int as libc::c_longlong;
+        e = e.offset(1); b = e; // Save address for jump patching
+        stmt(); // Parse 'then' statement
+        // Handle 'else' clause
+        if tk == Else as libc::c_int as libc::c_longlong {
+            *b = e.offset(3 as libc::c_int as isize) as libc::c_longlong; // Patch BZ to skip else
+            e = e.offset(1); *e = JMP as libc::c_int as libc::c_longlong; // Jump to end
+            e = e.offset(1); b = e; // Save address for jump patching
+            next(); // Consume 'else'
+            stmt(); // Parse 'else' statement
+        }
+        *b = e.offset(1 as libc::c_int as isize) as libc::c_longlong; // Patch jump to end
+    }
+    // Handle 'while' statement
+    else if tk == While as libc::c_int as libc::c_longlong {
+        next(); // Consume 'while'
+        a = e.offset(1 as libc::c_int as isize); // Mark loop start
+        // Expect opening parenthesis
+        if tk == '(' as i32 as libc::c_longlong {
+            next();
+        } else {
+            printf(b"%d: open paren expected\n\0" as *const u8 as *const libc::c_char, line);
+            exit(-(1 as libc::c_int));
+        }
+        // Parse loop condition
+        expr(Assign as libc::c_int as libc::c_longlong);
+        // Expect closing parenthesis
+        if tk == ')' as i32 as libc::c_longlong {
+            next();
+        } else {
+            printf(b"%d: close paren expected\n\0" as *const u8 as *const libc::c_char, line);
+            exit(-(1 as libc::c_int));
+        }
+        // Emit branch-if-zero to exit loop
+        e = e.offset(1); *e = BZ as libc::c_int as libc::c_longlong;
+        e = e.offset(1); b = e; // Save address for jump patching
+        stmt(); // Parse loop body
+        // Emit jump back to loop start
+        e = e.offset(1); *e = JMP as libc::c_int as libc::c_longlong;
+        e = e.offset(1); *e = a as libc::c_longlong;
+        *b = e.offset(1 as libc::c_int as isize) as libc::c_longlong; // Patch BZ to loop end
+    }
+    // Handle 'return' statement
+    else if tk == Return as libc::c_int as libc::c_longlong {
+        next(); // Consume 'return'
+        // Parse optional return value
+        if tk != ';' as i32 as libc::c_longlong {
+            expr(Assign as libc::c_int as libc::c_longlong);
+        }
+        // Emit leave function instruction
+        e = e.offset(1); *e = LEV as libc::c_int as libc::c_longlong;
+        // Expect semicolon
+        if tk == ';' as i32 as libc::c_longlong {
+            next();
+        } else {
+            printf(b"%d: semicolon expected\n\0" as *const u8 as *const libc::c_char, line);
+            exit(-(1 as libc::c_int));
+        }
+    }
+    // Handle compound statement (block)
+    else if tk == '{' as i32 as libc::c_longlong {
+        next(); // Consume '{'
+        // Parse statements until closing brace
+        while tk != '}' as i32 as libc::c_longlong {
+            stmt();
+        }
+        next(); // Consume '}'
+    }
+    // Handle empty statement
+    else if tk == ';' as i32 as libc::c_longlong {
+        next(); // Consume ';'
+    }
+    // Handle expression statement
+    else {
+        expr(Assign as libc::c_int as libc::c_longlong); // Parse expression
+        // Expect semicolon
+        if tk == ';' as i32 as libc::c_longlong {
+            next();
+        } else {
+            printf(b"%d: semicolon expected\n\0" as *const u8 as *const libc::c_char, line);
+            exit(-(1 as libc::c_int));
+        }
+    }
+}
+//COMMENTED
+// Main function for the C4 compiler/interpreter, accessible from C code
+unsafe fn main_0(
+    mut argc: libc::c_longlong, // Argument count
+    mut argv: *mut *mut libc::c_char, // Argument vector
+) -> libc::c_longlong {
+    // Initialize variables
+    let mut fd: libc::c_longlong = 0; // File descriptor
+    let mut bt: libc::c_longlong = 0; // Base type for declarations
+    let mut ty_0: libc::c_longlong = 0; // Current type
+    let mut poolsz: libc::c_longlong = (256 * 1024) as libc::c_longlong; // Memory pool size (256KB)
+    let mut idmain: *mut libc::c_longlong = 0 as *mut libc::c_longlong; // Pointer to main function symbol
+    let mut pc: *mut libc::c_longlong = 0 as *mut libc::c_longlong; // Program counter
+    let mut sp: *mut libc::c_longlong = 0 as *mut libc::c_longlong; // Stack pointer
+    let mut bp: *mut libc::c_longlong = 0 as *mut libc::c_longlong; // Base pointer
+    let mut a: libc::c_longlong = 0; // Accumulator
+    let mut cycle: libc::c_longlong = 0; // Instruction cycle counter
+    let mut i: libc::c_longlong = 0; // General-purpose counter
+    let mut t: *mut libc::c_longlong = 0 as *mut libc::c_longlong; // Temporary pointer
+
+    // Process command-line arguments
+    argc -= 1; // Skip program name
+    argv = argv.offset(1);
+    // Check for source output flag (-s)
+    if argc > 0 && **argv as libc::c_int == '-' as i32 && *(*argv).offset(1) as libc::c_int == 's' as i32 {
+        src = 1; // Enable source output
+        argc -= 1;
+        argv = argv.offset(1);
+    }
+    // Check for debug flag (-d)
+    if argc > 0 && **argv as libc::c_int == '-' as i32 && *(*argv).offset(1) as libc::c_int == 'd' as i32 {
+        debug = 1; // Enable debug output
+        argc -= 1;
+        argv = argv.offset(1);
+    }
+    // Ensure a source file is provided
+    if argc < 1 {
+        printf(b"usage: c4 [-s] [-d] file ...\n\0" as *const u8 as *const libc::c_char);
+        return -(1 as libc::c_int) as libc::c_longlong;
+    }
+
+    // Open source file
+    fd = open(*argv, 0 as libc::c_int) as libc::c_longlong;
+    if fd < 0 {
+        printf(b"could not open(%s)\n\0" as *const u8 as *const libc::c_char, *argv);
+        return -(1 as libc::c_int) as libc::c_longlong;
+    }
+
+    // Allocate memory pools
+    sym = malloc(poolsz as libc::c_ulong) as *mut libc::c_longlong; // Symbol table
+    if sym.is_null() {
+        printf(b"could not malloc(%d) symbol area\n\0" as *const u8 as *const libc::c_char, poolsz);
+        return -(1 as libc::c_int) as libc::c_longlong;
+    }
+    e = malloc(poolsz as libc::c_ulong) as *mut libc::c_longlong; // Code segment
+    le = e;
+    if le.is_null() {
+        printf(b"could not malloc(%d) text area\n\0" as *const u8 as *const libc::c_char, poolsz);
+        return -(1 as libc::c_int) as libc::c_longlong;
+    }
+    data = malloc(poolsz as libc::c_ulong) as *mut libc::c_char; // Data segment
+    if data.is_null() {
+        printf(b"could not malloc(%d) data area\n\0" as *const u8 as *const libc::c_char, poolsz);
+        return -(1 as libc::c_int) as libc::c_longlong;
+    }
+    sp = malloc(poolsz as libc::c_ulong) as *mut libc::c_longlong; // Stack
+    if sp.is_null() {
+        printf(b"could not malloc(%d) stack area\n\0" as *const u8 as *const libc::c_char, poolsz);
+        return -(1 as libc::c_int) as libc::c_longlong;
+    }
+
+    // Initialize memory pools
+    memset(sym as *mut libc::c_void, 0, poolsz as libc::c_ulong);
+    memset(e as *mut libc::c_void, 0, poolsz as libc::c_ulong);
+    memset(data as *mut libc::c_void, 0, poolsz as libc::c_ulong);
+
+    // Initialize keyword and system call symbols
+    p = b"char else enum if int return sizeof while open read close printf malloc free memset memcmp exit void main\0" as *const u8 as *const libc::c_char as *mut libc::c_char;
+    i = Char as libc::c_int as libc::c_longlong;
+    while i <= While as libc::c_int as libc::c_longlong {
+        next(); // Tokenize keyword
+        *id.offset(Tk as libc::c_int as isize) = i; // Assign token type
+        i += 1;
+    }
+    i = OPEN as libc::c_int as libc::c_longlong;
+    while i <= EXIT as libc::c_int as libc::c_longlong {
+        next(); // Tokenize system call
+        *id.offset(Class as libc::c_int as isize) = Sys as libc::c_int as libc::c_longlong; // Mark as system call
+        *id.offset(Type as libc::c_int as isize) = INT as libc::c_int as libc::c_longlong; // Set return type
+        *id.offset(Val as libc::c_int as isize) = i; // Set syscall number
+        i += 1;
+    }
+    next(); // Tokenize 'void'
+    *id.offset(Tk as libc::c_int as isize) = Char as libc::c_int as libc::c_longlong; // Treat as char
+    next(); // Tokenize 'main'
+    idmain = id; // Save main function symbol
+
+    // Allocate source code buffer
+    p = malloc(poolsz as libc::c_ulong) as *mut libc::c_char;
+    lp = p;
+    if lp.is_null() {
+        printf(b"could not malloc(%d) source area\n\0" as *const u8 as *const libc::c_char, poolsz);
+        return -(1 as libc::c_int) as libc::c_longlong;
+    }
+
+    // Read source file
+    i = read(fd as libc::c_int, p as *mut libc::c_void, (poolsz - 1) as size_t) as libc::c_longlong;
+    if i <= 0 {
+        printf(b"read() returned %d\n\0" as *const u8 as *const libc::c_char, i);
+        return -(1 as libc::c_int) as libc::c_longlong;
+    }
+    *p.offset(i as isize) = 0; // Null-terminate source
+    close(fd as libc::c_int);
+
+    // Initialize parser
+    line = 1;
+    next(); // Get first token
+
+    // Parse global declarations
+    while tk != 0 {
+        bt = INT as libc::c_int as libc::c_longlong; // Default base type
+        if tk == Int as libc::c_int as libc::c_longlong {
+            next();
+        } else if tk == Char as libc::c_int as libc::c_longlong {
+            next();
+            bt = CHAR as libc::c_int as libc::c_longlong;
+        } else if tk == Enum as libc::c_int as libc::c_longlong {
+            next();
+            if tk != '{' as i32 as libc::c_longlong {
+                next(); // Skip enum name
+            }
+            if tk == '{' as i32 as libc::c_longlong {
+                next();
+                i = 0; // Enum value counter
+                while tk != '}' as i32 as libc::c_longlong {
+                    if tk != Id as libc::c_int as libc::c_longlong {
+                        printf(b"%d: bad enum identifier %d\n\0" as *const u8 as *const libc::c_char, line, tk);
+                        return -(1 as libc::c_int) as libc::c_longlong;
+                    }
+                    next();
+                    if tk == Assign as libc::c_int as libc::c_longlong {
+                        next();
+                        if tk != Num as libc::c_int as libc::c_longlong {
+                            printf(b"%d: bad enum initializer\n\0" as *const u8 as *const libc::c_char, line);
+                            return -(1 as libc::c_int) as libc::c_longlong;
+                        }
+                        i = ival; // Set enum value
+                        next();
+                    }
+                    *id.offset(Class as libc::c_int as isize) = Num as libc::c_int as libc::c_longlong; // Mark as constant
+                    *id.offset(Type as libc::c_int as isize) = INT as libc::c_int as libc::c_longlong;
+                    *id.offset(Val as libc::c_int as isize) = i; // Store value
+                    i += 1;
+                    if tk == ',' as i32 as libc::c_longlong {
+                        next();
+                    }
+                }
+                next(); // Consume '}'
+            }
+        }
+        // Parse variables or functions
+        while tk != ';' as i32 as libc::c_longlong && tk != '}' as i32 as libc::c_longlong {
+            ty_0 = bt;
+            // Handle pointer types
+            while tk == Mul as libc::c_int as libc::c_longlong {
+                next();
+                ty_0 = ty_0 + PTR as libc::c_int as libc::c_longlong;
+            }
+            if tk != Id as libc::c_int as libc::c_longlong {
+                printf(b"%d: bad global declaration\n\0" as *const u8 as *const libc::c_char, line);
+                return -(1 as libc::c_int) as libc::c_longlong;
+            }
+            if *id.offset(Class as libc::c_int as isize) != 0 {
+                printf(b"%d: duplicate global definition\n\0" as *const u8 as *const libc::c_char, line);
+                return -(1 as libc::c_int) as libc::c_longlong;
+            }
+            next();
+            *id.offset(Type as libc::c_int as isize) = ty_0;
+            // Function definition
+            if tk == '(' as i32 as libc::c_longlong {
+                *id.offset(Class as libc::c_int as isize) = Fun as libc::c_int as libc::c_longlong;
+                *id.offset(Val as libc::c_int as isize) = e.offset(1 as libc::c_int as isize) as libc::c_longlong; // Function address
+                next();
+                i = 0; // Parameter counter
+                // Parse parameters
+                while tk != ')' as i32 as libc::c_longlong {
+                    ty_0 = INT as libc::c_int as libc::c_longlong;
+                    if tk == Int as libc::c_int as libc::c_longlong {
+                        next();
+                    } else if tk == Char as libc::c_int as libc::c_longlong {
+                        next();
+                        ty_0 = CHAR as libc::c_int as libc::c_longlong;
+                    }
+                    while tk == Mul as libc::c_int as libc::c_longlong {
+                        next();
+                        ty_0 = ty_0 + PTR as libc::c_int as libc::c_longlong;
+                    }
+                    if tk != Id as libc::c_int as libc::c_longlong {
+                        printf(b"%d: bad parameter declaration\n\0" as *const u8 as *const libc::c_char, line);
+                        return -(1 as libc::c_int) as libc::c_longlong;
+                    }
+                    if *id.offset(Class as libc::c_int as isize) == Loc as libc::c_int as libc::c_longlong {
+                        printf(b"%d: duplicate parameter definition\n\0" as *const u8 as *const libc::c_char, line);
+                        return -(1 as libc::c_int) as libc::c_longlong;
+                    }
+                    // Save and set symbol attributes
+                    *id.offset(HClass as libc::c_int as isize) = *id.offset(Class as libc::c_int as isize);
+                    *id.offset(Class as libc::c_int as isize) = Loc as libc::c_int as libc::c_longlong;
+                    *id.offset(HType as libc::c_int as isize) = *id.offset(Type as libc::c_int as isize);
+                    *id.offset(Type as libc::c_int as isize) = ty_0;
+                    *id.offset(HVal as libc::c_int as isize) = *id.offset(Val as libc::c_int as isize);
+                    *id.offset(Val as libc::c_int as isize) = i;
+                    i += 1;
+                    next();
+                    if tk == ',' as i32 as libc::c_longlong {
+                        next();
+                    }
+                }
+                next(); // Consume ')'
+                if tk != '{' as i32 as libc::c_longlong {
+                    printf(b"%d: bad function definition\n\0" as *const u8 as *const libc::c_char, line);
+                    return -(1 as libc::c_int) as libc::c_longlong;
+                }
+                i += 1;
+                loc = i; // Set local variable offset
+                next(); // Consume '{'
+                // Parse local variable declarations
+                while tk == Int as libc::c_int as libc::c_longlong || tk == Char as libc::c_int as libc::c_longlong {
+                    bt = (if tk == Int as libc::c_int as libc::c_longlong { INT as libc::c_int } else { CHAR as libc::c_int }) as libc::c_longlong;
+                    next();
+                    while tk != ';' as i32 as libc::c_longlong {
+                        ty_0 = bt;
+                        while tk == Mul as libc::c_int as libc::c_longlong {
+                            next();
+                            ty_0 = ty_0 + PTR as libc::c_int as libc::c_longlong;
+                        }
+                        if tk != Id as libc::c_int as libc::c_longlong {
+                            printf(b"%d: bad local declaration\n\0" as *const u8 as *const libc::c_char, line);
+                            return -(1 as libc::c_int) as libc::c_longlong;
+                        }
+                        if *id.offset(Class as libc::c_int as isize) == Loc as libc::c_int as libc::c_longlong {
+                            printf(b"%d: duplicate local definition\n\0" as *const u8 as *const libc::c_char, line);
+                            return -(1 as libc::c_int) as libc::c_longlong;
+                        }
+                        // Save and set symbol attributes
+                        *id.offset(HClass as libc::c_int as isize) = *id.offset(Class as libc::c_int as isize);
+                        *id.offset(Class as libc::c_int as isize) = Loc as libc::c_int as libc::c_longlong;
+                        *id.offset(HType as libc::c_int as isize) = *id.offset(Type as libc::c_int as isize);
+                        *id.offset(Type as libc::c_int as isize) = ty_0;
+                        *id.offset(HVal as libc::c_int as isize) = *id.offset(Val as libc::c_int as isize);
+                        i += 1;
+                        *id.offset(Val as libc::c_int as isize) = i;
+                        next();
+                        if tk == ',' as i32 as libc::c_longlong {
+                            next();
+                        }
+                    }
+                    next(); // Consume ';'
+                }
+                // Emit function entry
+                e = e.offset(1); *e = ENT as libc::c_int as libc::c_longlong;
+                e = e.offset(1); *e = i - loc; // Stack frame size
+                // Parse function body
+                while tk != '}' as i32 as libc::c_longlong {
+                    stmt();
+                }
+                // Emit function exit
+                e = e.offset(1); *e = LEV as libc::c_int as libc::c_longlong;
+                // Restore symbol table
+                id = sym;
+                while *id.offset(Tk as libc::c_int as isize) != 0 {
+                    if *id.offset(Class as libc::c_int as isize) == Loc as libc::c_int as libc::c_longlong {
+                        *id.offset(Class as libc::c_int as isize) = *id.offset(HClass as libc::c_int as isize);
+                        *id.offset(Type as libc::c_int as isize) = *id.offset(HType as libc::c_int as isize);
+                        *id.offset(Val as libc::c_int as isize) = *id.offset(HVal as libc::c_int as isize);
+                    }
+                    id = id.offset(Idsz as libc::c_int as isize);
+                }
+            } else {
+                // Global variable
+                *id.offset(Class as libc::c_int as isize) = Glo as libc::c_int as libc::c_longlong;
+                *id.offset(Val as libc::c_int as isize) = data as libc::c_longlong; // Data segment address
+                data = data.offset(::core::mem::size_of::<libc::c_longlong>() as libc::c_ulong as isize); // Allocate space
+            }
+            if tk == ',' as i32 as libc::c_longlong {
+                next();
+            }
+        }
+        next(); // Consume ';' or '}'
+    }
+
+    // Locate main function
+    pc = *idmain.offset(Val as libc::c_int as isize) as *mut libc::c_longlong;
+    if pc.is_null() {
+        printf(b"main() not defined\n\0" as *const u8 as *const libc::c_char);
+        return -(1 as libc::c_int) as libc::c_longlong;
+    }
+    // Exit if source output mode
+    if src != 0 {
+        return 0;
+    }
+
+    // Initialize runtime stack
+    sp = (sp as libc::c_longlong + poolsz) as *mut libc::c_longlong; // Set stack top
+    bp = sp;
+    sp = sp.offset(-1); *sp = EXIT as libc::c_int as libc::c_longlong; // Push exit instruction
+    sp = sp.offset(-1); *sp = PSH as libc::c_int as libc::c_longlong; // Push return address
+    t = sp;
+    sp = sp.offset(-1); *sp = argc; // Push argument count
+    sp = sp.offset(-1); *sp = argv as libc::c_longlong; // Push argument vector
+    sp = sp.offset(-1); *sp = t as libc::c_longlong; // Push return address
+
+    // Execute generated code
+    cycle = 0;
+    loop {
+        i = *pc; // Fetch instruction
+        pc = pc.offset(1);
+        cycle += 1;
+
+        // Debug output
+        if debug != 0 {
+            printf(b"%d> %.4s\0" as *const u8 as *const libc::c_char, cycle,
+                &*(b"LEA ,IMM ,JMP ,JSR ,BZ  ,BNZ ,ENT ,ADJ ,LEV ,LI  ,LC  ,SI  ,SC  ,PSH ,OR  ,XOR ,AND ,EQ  ,NE  ,LT  ,GT  ,LE  ,GE  ,SHL ,SHR ,ADD ,SUB ,MUL ,DIV ,MOD ,OPEN,READ,CLOS,PRTF,MALC,FREE,MSET,MCMP,EXIT,\0"
+                    as *const u8 as *const libc::c_char).offset((i * 5) as isize) as *const libc::c_char);
+            if i <= ADJ as libc::c_int as libc::c_longlong {
+                printf(b" %d\n\0" as *const u8 as *const libc::c_char, *pc);
+            } else {
+                printf(b"\n\0" as *const u8 as *const libc::c_char);
+            }
+        }
+
+        // Execute instructions
+        if i == LEA as libc::c_int as libc::c_longlong {
+            a = bp.offset(*pc as isize) as libc::c_longlong; // Load effective address
+            pc = pc.offset(1);
+        } else if i == IMM as libc::c_int as libc::c_longlong {
+            a = *pc; // Load immediate value
+            pc = pc.offset(1);
+        } else if i == JMP as libc::c_int as libc::c_longlong {
+            pc = *pc as *mut libc::c_longlong; // Jump
+        } else if i == JSR as libc::c_int as libc::c_longlong {
+            sp = sp.offset(-1); *sp = pc.offset(1) as libc::c_longlong; // Push return address
+            pc = *pc as *mut libc::c_longlong; // Jump to subroutine
+        } else if i == BZ as libc::c_int as libc::c_longlong {
+            pc = if a != 0 { pc.offset(1) } else { *pc as *mut libc::c_longlong }; // Branch if zero
+        } else if i == BNZ as libc::c_int as libc::c_longlong {
+            pc = if a != 0 { *pc as *mut libc::c_longlong } else { pc.offset(1) }; // Branch if non-zero
+        } else if i == ENT as libc::c_int as libc::c_longlong {
+            sp = sp.offset(-1); *sp = bp as libc::c_longlong; // Save base pointer
+            bp = sp;
+            sp = sp.offset(-(*pc as isize)); // Allocate stack frame
+            pc = pc.offset(1);
+        } else if i == ADJ as libc::c_int as libc::c_longlong {
+            sp = sp.offset(*pc as isize); // Adjust stack
+            pc = pc.offset(1);
+        } else if i == LEV as libc::c_int as libc::c_longlong {
+            sp = bp; // Restore stack pointer
+            bp = *sp as *mut libc::c_longlong; // Restore base pointer
+            sp = sp.offset(1);
+            pc = *sp as *mut libc::c_longlong; // Return
+            sp = sp.offset(1);
+        } else if i == LI as libc::c_int as libc::c_longlong {
+            a = *(a as *mut libc::c_longlong); // Load integer
+        } else if i == LC as libc::c_int as libc::c_longlong {
+            a = *(a as *mut libc::c_char) as libc::c_longlong; // Load char
+        } else if i == SI as libc::c_int as libc::c_longlong {
+            *(sp as *mut libc::c_longlong) = a; // Store integer
+            sp = sp.offset(1);
+        } else if i == SC as libc::c_int as libc::c_longlong {
+            *(sp as *mut libc::c_char) = a as libc::c_char; // Store char
+            a = *(sp as *mut libc::c_char) as libc::c_longlong;
+            sp = sp.offset(1);
+        } else if i == PSH as libc::c_int as libc::c_longlong {
+            sp = sp.offset(-1); *sp = a; // Push accumulator
+        } else if i == OR as libc::c_int as libc::c_longlong {
+            a = *sp | a; // Bitwise OR
+            sp = sp.offset(1);
+        } else if i == XOR as libc::c_int as libc::c_longlong {
+            a = *sp ^ a; // Bitwise XOR
+            sp = sp.offset(1);
+        } else if i == AND as libc::c_int as libc::c_longlong {
+            a = *sp & a; // Bitwise AND
+            sp = sp.offset(1);
+        } else if i == EQ as libc::c_int as libc::c_longlong {
+            a = (*sp == a) as libc::c_int as libc::c_longlong; // Equality
+            sp = sp.offset(1);
+        } else if i == NE as libc::c_int as libc::c_longlong {
+            a = (*sp != a) as libc::c_int as libc::c_longlong; // Inequality
+            sp = sp.offset(1);
+        } else if i == LT as libc::c_int as libc::c_longlong {
+            a = (*sp < a) as libc::c_int as libc::c_longlong; // Less than
+            sp = sp.offset(1);
+        } else if i == GT as libc::c_int as libc::c_longlong {
+            a = (*sp > a) as libc::c_int as libc::c_longlong; // Greater than
+            sp = sp.offset(1);
+        } else if i == LE as libc::c_int as libc::c_longlong {
+            a = (*sp <= a) as libc::c_int as libc::c_longlong; // Less or equal
+            sp = sp.offset(1);
+        } else if i == GE as libc::c_int as libc::c_longlong {
+            a = (*sp >= a) as libc::c_int as libc::c_longlong; // Greater or equal
+            sp = sp.offset(1);
+        } else if i == SHL as libc::c_int as libc::c_longlong {
+            a = *sp << a; // Left shift
+            sp = sp.offset(1);
+        } else if i == SHR as libc::c_int as libc::c_longlong {
+            a = *sp >> a; // Right shift
+            sp = sp.offset(1);
+        } else if i == ADD as libc::c_int as libc::c_longlong {
+            a = *sp + a; // Addition
+            sp = sp.offset(1);
+        } else if i == SUB as libc::c_int as libc::c_longlong {
+            a = *sp - a; // Subtraction
+            sp = sp.offset(1);
+        } else if i == MUL as libc::c_int as libc::c_longlong {
+            a = *sp * a; // Multiplication
+            sp = sp.offset(1);
+        } else if i == DIV as libc::c_int as libc::c_longlong {
+            a = *sp / a; // Division
+            sp = sp.offset(1);
+        } else if i == MOD as libc::c_int as libc::c_longlong {
+            a = *sp % a; // Modulo
+            sp = sp.offset(1);
+        } else if i == OPEN as libc::c_int as libc::c_longlong {
+            a = open(*sp.offset(1) as *mut libc::c_char, *sp as libc::c_int) as libc::c_longlong; // File open
+        } else if i == READ as libc::c_int as libc::c_longlong {
+            a = read(*sp.offset(2) as libc::c_int, *sp.offset(1) as *mut libc::c_void, *sp as size_t) as libc::c_longlong; // File read
+        } else if i == CLOS as libc::c_int as libc::c_longlong {
+            a = close(*sp as libc::c_int) as libc::c_longlong; // File close
+        } else if i == PRTF as libc::c_int as libc::c_longlong {
+            t = sp.offset(*pc.offset(1) as isize); // Get argument count
+            a = printf(*t.offset(-1) as *mut libc::c_char, *t.offset(-2), *t.offset(-3), *t.offset(-4), *t.offset(-5), *t.offset(-6)) as libc::c_longlong; // Printf
+        } else if i == MALC as libc::c_int as libc::c_longlong {
+            a = malloc(*sp as libc::c_ulong) as libc::c_longlong; // Memory allocation
+        } else if i == FREE as libc::c_int as libc::c_longlong {
+            free(*sp as *mut libc::c_void); // Free memory
+        } else if i == MSET as libc::c_int as libc::c_longlong {
+            a = memset(*sp.offset(2) as *mut libc::c_void, *sp.offset(1) as libc::c_int, *sp as libc::c_ulong) as libc::c_longlong; // Memory set
+        } else if i == MCMP as libc::c_int as libc::c_longlong {
+            a = memcmp(*sp.offset(2) as *const libc::c_void, *sp.offset(1) as *const libc::c_void, *sp as libc::c_ulong) as libc::c_longlong; // Memory compare
+        } else if i == EXIT as libc::c_int as libc::c_longlong {
+            return *sp; // Exit program
+        } else {
+            printf(b"unknown instruction = %d! cycle = %d\n\0" as *const u8 as *const libc::c_char, i, cycle);
+            return -(1 as libc::c_int) as libc::c_longlong;
+        }
+    }
+}
+
+// Entry point for the C4 compiler/interpreter
+pub fn main() {
+    // Create a vector to store C-style string pointers
+    let mut args: Vec::<*mut libc::c_char> = Vec::new();
+
+    // Convert Rust command-line arguments to C-style strings
+    for arg in ::std::env::args() {
+        // Convert each argument to a CString and leak it to get a raw pointer
+        args.push(
+            ::std::ffi::CString::new(arg)
+                .expect("Failed to convert argument into CString.")
+                .into_raw(),
+        );
+    }
+
+    // Add null terminator to the argument list
+    args.push(::core::ptr::null_mut());
+
+    // Call the main_0 function with the argument count and array
+    unsafe {
+        // Exit with the return code from main_0
+        ::std::process::exit(main_0(
+            (args.len() - 1) as libc::c_longlong, // Subtract 1 to exclude null terminator
+            args.as_mut_ptr() as *mut *mut libc::c_char, // Pass argument array
+        ) as i32);
+    }
+}
